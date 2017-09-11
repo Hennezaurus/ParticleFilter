@@ -132,7 +132,8 @@ def initial_population(region, scale = 10, pop_size=20):
     # Debug code to look at a specific pose
     #return np.array([[50, 50, 0, 50]])
 
-#------------------------------------------------------------------------------        
+#------------------------------------------------------------------------------   
+     
 def test_particle_filter_search(use_image_one=True, pop_size=60, num_generations=40, verbose=False):
     '''
     Run the particle filter search on test image 1 or image 2 of the pattern_utils module
@@ -264,7 +265,7 @@ def get_clean_combinations(individual_limit):
     return(clean_combinations)
 
 
-
+#-----------------------------------------------------------------------------
         
 def compare_pop_vs_gen(iterations, num_individuals, image_one=True, verbose=True):
         
@@ -347,6 +348,9 @@ def compare_computational_budgets(comp_budgets, iteration_count, use_image_one=T
     # Loop through the list of given individual counts and track their best result
     for idx, budget in enumerate(comp_budgets):
         
+        if verbose:
+            print("Testing Budget: " + str(budget))
+        
         # Run test for this computational budget, store best results
         cost, time_taken = compare_pop_vs_gen(iterations = iteration_count,
                                               num_individuals = budget,
@@ -408,7 +412,7 @@ if __name__=='__main__':
     
     budgets = [200, 400, 600, 800, 1000, 1200, 1400, 1600, 1800, 2000]
     compare_computational_budgets(budgets,
-                                  iteration_count = 100,
+                                  iteration_count = 1,
                                   use_image_one=True,
                                   verbose=True)
     

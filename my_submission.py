@@ -113,7 +113,13 @@ class PatternPosePopulation(population_search.Population):
 
 def initial_population(region, scale = 10, pop_size=20):
     '''
+    Generate initial population poses.
+    Creates a series of random guesses to populate our self.W
+    pose limit. These are bound within a region to keep the guesses
+    reasonable (not outside the image)
     
+    @return:
+        Initial values to use for self.W 
     '''        
     # initial population: exploit info from region
     rmx, rMx, rmy, rMy = region
@@ -138,6 +144,11 @@ def test_particle_filter_search(use_image_one=True, pop_size=60, num_generations
     '''
     Run the particle filter search on test image 1 or image 2 of the pattern_utils module
     
+    If verbose, prints out the neat graph replay of the search,
+    including the final result
+            
+    @return:
+        If not verbose, return the final best cost, and time taken
     '''
     
     if use_image_one:
@@ -222,7 +233,18 @@ def test_particle_filter_search(use_image_one=True, pop_size=60, num_generations
 #-----------------------------------------------------------------------------    
     
 def make_true_distance_image(show=False):
-#    ps = pattern_utils.Square()
+    '''
+    Create a depth image with just the triangle we're searching for
+    
+    This allows us to compare to this for our final evaluation (not during
+    the evaluate call) to see how close our final result was to the 'actual'
+    image we're searching for, not just 'low cost' which could be a mis-
+    classification.
+    
+    @return:
+        Depth image to calculate true cost against
+    '''
+    
     pt = pattern_utils.Triangle(2)
     
     pat_list = [pt]#, pt]
@@ -249,6 +271,16 @@ def make_true_distance_image(show=False):
 #-----------------------------------------------------------------------------
 
 def get_clean_combinations(individual_limit):
+    '''
+    Find all population/generation combinations for this budget
+    
+    @individual_limit:
+        The evaluation budget we want to find combos for
+        
+    @return:
+        All pairs of integers which can be cleanly multiplied together
+        to get the individual_limit
+    '''
     
     # Generate all integers up to and including our limit
     values = np.arange(1, individual_limit+1, 1)
@@ -268,7 +300,33 @@ def get_clean_combinations(individual_limit):
 #-----------------------------------------------------------------------------
         
 def compare_pop_vs_gen(iterations, num_individuals, image_one=True, verbose=True):
+    '''
+    Compare different population and generation counts for a given budget.
+    
+    Run the particle filter [iterations] times for each clean combination,
+    and eventually either graph and print the median results to show a 
+    comparison of these options. Alternately returns the minimum for this
+    budget, which can be used to compare budgets.
+    
+    Inputs:
+    @iterations:
+        Number of times to repeat filter for each combo to get more accuracy
+        Takes median of all iterations
+    @num_individuals:
+        Computational budget to do the testing for
+    @image_one:
+        Whether to use test image one, or test image two
+    @verbose:
+        Print and graph the data if true
+        Return useful minimums if false
+    
+    Outputs:
+    @return:
+        If not verbose, returns minimum cost and time found for this budget,
+        for use when coparing budgets
         
+    '''
+    
     # All pairs of values which cleanly multiply to num_individuals
     combinations = get_clean_combinations(num_individuals)
 
@@ -339,8 +397,25 @@ def compare_pop_vs_gen(iterations, num_individuals, image_one=True, verbose=True
 
 #------------------------------------------------------------------------------
 
-    
 def compare_computational_budgets(comp_budgets, iteration_count, use_image_one=True, verbose=True):
+    '''
+    Compare different computational budgets
+    
+    Runs all combinations for each budget 'iteration_count' times (for accuracy)
+    gets the median of the iterations, then the minimum (or best) cost and time
+    accross the combo's tested, so we're comparing the 'best' combo for each 
+    computational budget.
+    
+    @comp_budgets:
+        A list of budgets we want to test
+    @iteration_count:
+        How many times to repeat each combo's test for accuracy
+    @use_image_one:
+        Whether to use test image one or test image two
+    @verbose:
+        Whether to print out and graph our results
+        
+    '''
     
     # Prepare an array to populate with our best answers given various individual counts
     budget_results = np.zeros((len(comp_budgets), 2))
@@ -393,75 +468,26 @@ def compare_computational_budgets(comp_budgets, iteration_count, use_image_one=T
 #------------------------------------------------------------------------------        
 
 if __name__=='__main__':
+
     
-    
-    """
     test_particle_filter_search(use_image_one=True,
                                 pop_size=100,
                                 num_generations=10,
                                 verbose=True)
-    """
+
 
     """
-    test = compare_pop_vs_gen(iterations = 9,
-                              num_individuals = 1000,
-                              image_one = True,
-                              verbose=True)
+    comparison = compare_pop_vs_gen(iterations = 5,
+                                    num_individuals = 1000,
+                                    image_one = True,
+                                    verbose=True)
     """
-    
-    
+
+    """   
     budgets = [200, 400, 600, 800, 1000, 1200, 1400, 1600, 1800, 2000]
     compare_computational_budgets(budgets,
-                                  iteration_count = 1,
+                                  iteration_count = 100,
                                   use_image_one=True,
                                   verbose=True)
-    
-    
-    
-# ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-#                               CODE CEMETARY        
-    
-#        
-#    def test_2():
-#        '''
-#        Run the particle filter search on test image 2 of the pattern_utils module
-#        
-#        '''
-#        imf, imd , pat_list, pose_list = pattern_utils.make_test_image_2(False)
-#        pat = pat_list[0]
-#        
-#        #region = (100,150,40,60)
-#        xs, ys = pose_list[0][:2]
-#        region = (xs-20, xs+20, ys-20, ys+20)
-#        
-#        W = initial_population_2(region, scale = 30, pop_size=40)
-#        
-#        pop = PatternPosePopulation(W, pat)
-#        pop.set_distance_image(imd)
-#        
-#        pop.temperature = 5
-#        
-#        Lw, Lc = pop.particle_filter_search(40,log=True)
-#        
-#        plt.plot(Lc)
-#        plt.title('Cost vs generation index')
-#        plt.show()
-#        
-#        print(pop.best_w)
-#        print(pop.best_cost)
-#        
-#        
-#        
-#        pattern_utils.display_solution(pat_list, 
-#                          pose_list, 
-#                          pat,
-#                          pop.best_w)
-#                          
-#        pattern_utils.replay_search(pat_list, 
-#                          pose_list, 
-#                          pat,
-#                          Lw)
-#    
-#    #------------------------------------------------------------------------------        
-#        
-    
+    """    
+#------------------------------------------------------------------------------

@@ -176,8 +176,7 @@ class Pattern(object):
                 return np.inf, Vp
             score += np.sum(S)  # L1 norm    
             #score = max(score,S.max())  # L_inf norm
-            if num_points == 0:
-                print("DIVIDE BY 0 ERROR YO")
+                
         return score/num_points, Vp
         
     def footprint(self, pose):

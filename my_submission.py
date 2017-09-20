@@ -9,8 +9,7 @@ Instructions:
 
 import numpy as np
 import matplotlib.pyplot as plt
-import math
-import time
+import math, time, csv, string
 
 import pattern_utils
 import population_search
@@ -19,7 +18,10 @@ import population_search
 
 class PatternPosePopulation(population_search.Population):
     '''
+    Pose recognition algorithm.
     
+    This class is initalized with data, and will run a particle filter
+    test, looking for a specific pattern within an image
     '''
     def __init__(self, W, pat):
         '''
@@ -29,8 +31,6 @@ class PatternPosePopulation(population_search.Population):
           W : initial population
         '''
         self.pat = pat
-        self.true_distance = None
-        self.true_cost = np.zeros((W.shape[0]))
         super().__init__(W)
     
     def evaluate(self):
@@ -55,30 +55,21 @@ class PatternPosePopulation(population_search.Population):
         # Ensure the scale can never drop below 1
         self.W[:,3] = np.maximum(self.W[:,3],1)
         
-        # For each individual pose
+        # Find score for each individual pose
         for idx, pose in enumerate(self.W):
+            self.C[idx], verticies = self.pat.evaluate(self.distance_image, pose)
+
             
-            # Use the given evaluate function to give a score to this pose
-            score, verticies = self.pat.evaluate(self.distance_image, pose)
-            self.C[idx] = score
-            
-            # Only worth doing for image one
-            if self.true_distance is not None:
-                true_score, true_verticies = self.pat.evaluate(self.true_distance, pose)
-                self.true_cost[idx] = true_score
-            
-        # Find index where true cost is the lowest
-        if self.true_distance is not None:
-            best_index = np.argmin(self.true_cost)
-        else:
-            best_index = np.argmin(self.C)
+        # Find index where cost is the lowest
+        best_index = np.argmin(self.C)
 
         # The cost and pose at this index are our best for this generation
         self.best_cost = self.C[best_index]
         self.best_w = self.W[best_index]
-       
+
         # Return value so it graphs
-        return(self.C[best_index])
+        return(self.best_cost)
+    
 
     def mutate(self):
         '''
@@ -111,7 +102,7 @@ class PatternPosePopulation(population_search.Population):
 
 #------------------------------------------------------------------------------        
 
-def initial_population(region, scale = 10, pop_size=20):
+def initial_population(region, scale = 10, pop_size=20, seed=None):
     '''
     Generate initial population poses.
     Creates a series of random guesses to populate our self.W
@@ -124,8 +115,12 @@ def initial_population(region, scale = 10, pop_size=20):
     # initial population: exploit info from region
     rmx, rMx, rmy, rMy = region
     
-#    np.random.seed(72) #- Example of local minima with 60 pop / 40 generation
-#    np.random.seed(1)    
+    # Randomize if not chosen
+    if(seed is None):
+        seed = np.random.randint(0, 1000)
+    
+    # For reproducability
+    np.random.seed(seed)    
 
     W = np.concatenate( (
                  np.random.uniform(low=rmx,high=rMx, size=(pop_size,1)) ,
@@ -140,7 +135,7 @@ def initial_population(region, scale = 10, pop_size=20):
 
 #------------------------------------------------------------------------------   
      
-def test_particle_filter_search(use_image_one=True, pop_size=60, num_generations=40, verbose=False):
+def test_particle_filter_search(use_image_one=True, pop_size=60, num_generations=40, seed=None, verbose=False):
     '''
     Run the particle filter search on test image 1 or image 2 of the pattern_utils module
     
@@ -151,34 +146,34 @@ def test_particle_filter_search(use_image_one=True, pop_size=60, num_generations
         If not verbose, return the final best cost, and time taken
     '''
     
+    # Create images needed
+    true_image = None
+    
     if use_image_one:
         # use image 1
         imf, imd , pat_list, pose_list = pattern_utils.make_test_image_1(verbose)
         ipat = 2 # index of the pattern to target
+        true_image = make_true_distance_image()
     else:
         # use image 2
         imf, imd , pat_list, pose_list = pattern_utils.make_test_image_2(verbose)
         ipat = 0 # index of the pattern to target
         
+    
     # Narrow the initial search region
-    pat = pat_list[ipat] #  (100,30, np.pi/3,40),
-    #    print(pat)
+    pat = pat_list[ipat]
     xs, ys = pose_list[ipat][:2]
     region = (xs-20, xs+20, ys-20, ys+20)
     scale = pose_list[ipat][3]
     
     # Get initial randomized population    
-    W = initial_population(region, scale , pop_size)
+    W = initial_population(region, scale , pop_size, seed)
     
     # Instantiate new PatterPosePopulation with our initial population and pattern
     pop = PatternPosePopulation(W, pat)
     
     # Give it a reference to our distance image
     pop.set_distance_image(imd)
-    
-    # Set up true distance if image one
-    if use_image_one:
-        pop.true_distance = make_true_distance_image()
     
     # Set temperature
     pop.temperature = 5
@@ -194,8 +189,14 @@ def test_particle_filter_search(use_image_one=True, pop_size=60, num_generations
         plt.show()
     
         # Print out final best results
-        print(pop.best_w)
-        print(pop.best_cost)
+        print("Best Pose: \n" + str(pop.best_w))
+        print("Best cost: " + str(pop.best_cost))
+        
+        # Find true cost of best pose
+        if(true_image is not None):
+            best_idx = np.argmin(pop.C)
+            true_cost, verts = pop.pat.evaluate(true_image, pop.W[best_idx])
+            print("Best true cost: " + str(true_cost))
     
         # Display our final solution
         pattern_utils.display_solution(pat_list, 
@@ -221,13 +222,18 @@ def test_particle_filter_search(use_image_one=True, pop_size=60, num_generations
         
         # Elapsed time
         time_elapsed = end - start
+        
+        if(true_image is not None):
+            # Find true cost of best pose
+            best_idx = np.argmin(pop.C)
+            true_cost, verts = pop.pat.evaluate(true_image, pop.W[best_idx])
 
         # 99.99% sure I fixed this, but just keep an eye out in case
         if math.isnan(pop.best_cost):
             raise ValueError('A cost was NaN, revisit clipping code')
             return(np.inf)
         
-        return(pop.best_cost, time_elapsed)
+        return(pop.best_cost, true_cost, time_elapsed)
         
     
 #-----------------------------------------------------------------------------    
@@ -248,9 +254,8 @@ def make_true_distance_image(show=False):
     pt = pattern_utils.Triangle(2)
     
     pat_list = [pt]#, pt]
-    pose_list = [(100,30, np.pi/3,40)]#,
-              #   (100,50, -np.pi/3,30)]    
-#    region = (45,90,25,60)
+    pose_list = [(100,30, np.pi/3,40)]
+
     imf = pattern_utils.pat_image(pat_list, pose_list)
 
     imd = pattern_utils.dist_image(imf)
@@ -285,13 +290,8 @@ def get_clean_combinations(individual_limit):
     # Generate all integers up to and including our limit
     values = np.arange(1, individual_limit+1, 1)
     
-    # List to populate
-    clean_combinations = []
-    
-    # Find and add all clean divisions
-    for i in values:
-        if individual_limit % i == 0:
-            clean_combinations.append([i, (individual_limit/i).astype(int)])
+    # Create list of clean combinations
+    clean_combinations = [(i, individual_limit//i) for i in values if individual_limit % i == 0]
             
     # Return neat list of divisible combinations
     return(clean_combinations)
@@ -301,12 +301,13 @@ def get_clean_combinations(individual_limit):
         
 def compare_pop_vs_gen(iterations, num_individuals, image_one=True, verbose=True):
     '''
-    Compare different population and generation counts for a given budget.
+    Summary:
+        Compare different population and generation counts for a given budget.
     
-    Run the particle filter [iterations] times for each clean combination,
-    and eventually either graph and print the median results to show a 
-    comparison of these options. Alternately returns the minimum for this
-    budget, which can be used to compare budgets.
+    Description:
+        Run the particle filter [iterations] times for each clean combination,
+        and keep the results in terms of cost, true cost, and time for
+        every search run. Returns this as a numpy array
     
     Inputs:
     @iterations:
@@ -322,8 +323,8 @@ def compare_pop_vs_gen(iterations, num_individuals, image_one=True, verbose=True
     
     Outputs:
     @return:
-        If not verbose, returns minimum cost and time found for this budget,
-        for use when coparing budgets
+        If verbose prints out and graphs values found
+        If not verbose returns the full ndarray of values found
         
     '''
     
@@ -331,7 +332,7 @@ def compare_pop_vs_gen(iterations, num_individuals, image_one=True, verbose=True
     combinations = get_clean_combinations(num_individuals)
 
     # List of combo values, cost and time
-    combo_values = np.zeros((len(combinations), iterations, 2))
+    combo_values = np.zeros((len(combinations), iterations, 7))
 
     # For each combo
     for idx, combo in enumerate(combinations):
@@ -340,35 +341,51 @@ def compare_pop_vs_gen(iterations, num_individuals, image_one=True, verbose=True
         for i in range(iterations):
         
             # Run the search
-            best_cost, delta_time = test_particle_filter_search(use_image_one=image_one,
-                                                                pop_size=combo[0],
-                                                                num_generations=combo[1],
-                                                                verbose=False)
-            # Store cost and time
-            combo_values[idx,i,0] = best_cost
-            combo_values[idx,i,1] = delta_time
+            best_cost, true_cost, delta_time = test_particle_filter_search(use_image_one=image_one,
+                                                                           pop_size=combo[0],
+                                                                           num_generations=combo[1],
+                                                                           seed=i,
+                                                                           verbose=False)
+            # Store row of data for this filter
+            combo_values[idx,i,4] = best_cost              # Best Cost
+            combo_values[idx,i,5] = true_cost              # True Cost of best pose
+            combo_values[idx,i,6] = delta_time             # Time taken to run filter
+            combo_values[idx,i,0] = num_individuals   # Comp budget for this run
+            combo_values[idx,i,2] = combo[0]          # Population Count
+            combo_values[idx,i,1] = combo[1]          # Generation Count
+            combo_values[idx,i,3] = i                 # Iteration number (also seed used)
 
     
     # To plot medians
-    combo_medians = np.zeros((len(combinations), 2))
+    combo_medians = np.zeros((len(combinations), 3))
     
     # For each combination, get median cost and time across all iterations
     for i in range(len(combinations)):
         combo_medians[i,0] = np.median(combo_values[i,:,0])        
-        combo_medians[i,1] = np.median(combo_values[i,:,1])        
+        combo_medians[i,1] = np.median(combo_values[i,:,1])
+        combo_medians[i,2] = np.median(combo_values[i,:,2])        
         
         # Print exact data
         if(verbose):
             print("\nPopulation Count: " + str(combinations[i][0]) +
-                  "\nGeneration Count: " + str(combinations[i][1]) +
-                  "\nCosts:")
+                  "\nGeneration Count: " + str(combinations[i][1]))
+            
+            print("\nCosts:")
             for cost in combo_values[i,:,0]:
                 print("\t" + str(cost))
             print("\tMedian Cost: " + str(combo_medians[i,0]))
+            
+            print("\nTrue Costs:")
+            for true_cost in combo_values[i,:,1]:
+                print("\t" + str(true_cost))
+            print("\tMedian True Cost: " + str(combo_medians[i,1]))
+            
             print("\nTimes:")
-            for timetaken in combo_values[i,:,1]:
+            for timetaken in combo_values[i,:,2]:
                 print("\t" + str(timetaken))
-            print("\tMedian Time: " + str(combo_medians[i,1]))
+            print("\tMedian Time: " + str(combo_medians[i,2]))
+            
+            
 
     if verbose:
         # Dummy x axis values for graph
@@ -382,17 +399,26 @@ def compare_pop_vs_gen(iterations, num_individuals, image_one=True, verbose=True
         plt.xticks(np.arange(min(xAxis), max(xAxis)+1, 1.0))
         plt.show()
         
-        # Graph Time
+        
+        # Graph True Error
         plt.bar(xAxis, combo_medians[:,1])
+        plt.title("True Cost As Generations vs Population Change")
+        plt.xlabel('Combination ID')
+        plt.ylabel('Median True Error of Final Pose')
+        plt.xticks(np.arange(min(xAxis), max(xAxis)+1, 1.0))
+        plt.show()
+        
+        # Graph Time
+        plt.bar(xAxis, combo_medians[:,2])
         plt.title("Time Taken As Generations vs Population Change")
         plt.xlabel('Combination ID')
         plt.ylabel('Median Time Taken (seconds)')
         plt.xticks(np.arange(min(xAxis), max(xAxis)+1, 1.0))
         plt.show()
         
-    # Otherwise return the best cost and best time found
+    # Otherwise return the entire data-set
     else:
-        return(np.min(combo_medians[:,0]), np.min(combo_medians[:,1]))    
+        return(combo_values)    
 
 
 #------------------------------------------------------------------------------
@@ -418,76 +444,72 @@ def compare_computational_budgets(comp_budgets, iteration_count, use_image_one=T
     '''
     
     # Prepare an array to populate with our best answers given various individual counts
-    budget_results = np.zeros((len(comp_budgets), 2))
+    budget_results = []
   
     # Loop through the list of given individual counts and track their best result
     for idx, budget in enumerate(comp_budgets):
         
-        if verbose:
-            print("Testing Budget: " + str(budget))
+        print("Testing Budget: " + str(budget))
         
-        # Run test for this computational budget, store best results
-        cost, time_taken = compare_pop_vs_gen(iterations = iteration_count,
-                                              num_individuals = budget,
-                                              image_one = use_image_one,
-                                              verbose = False)
+        # Run test for this computational budget, store results
+        budget_results.append(compare_pop_vs_gen(iterations = iteration_count,
+                                                 num_individuals = budget,
+                                                 image_one = use_image_one,
+                                                 verbose = False))
         
-        # Store results in final array
-        budget_results[idx,0] = cost
-        budget_results[idx,1] = time_taken
+    # Write the complete data output to a file
+    save_data(budget_results)
     
     
-    if verbose:
+def save_data(data):
+    
+    # Open connection to the file
+    with open('data.csv', 'w', newline='') as csvfile:
+        w = csv.writer(csvfile, delimiter=',')
+        w.writerow(['Budget', 'Generations', 'Population', 'Seed', 'Best Cost', 'True Cost', 'Duration'])
+        for budget in data:
+            for combo in budget:
+                for iteration in combo:
+                    # Prepare output
+                    output = []
+                    output.append(str(int(iteration[0])))
+                    output.append(str(int(iteration[1])))
+                    output.append(str(int(iteration[2])))
+                    output.append(str(int(iteration[3])))
+                    output.append(str(iteration[4]))
+                    output.append(str(iteration[5]))
+                    output.append(str(iteration[6]))
+                    
+                    # Add to csv
+                    w.writerow(output)
         
-        # Print out log data
-        for i, budget in enumerate(comp_budgets):
-            print("Testing with " + str(budget) + " individuals")
-            print("\tBest cost: " + str(budget_results[i,0]))
-            print("\tBest time: " + str(budget_results[i,1]))
-    
-        # Graph results
-        x_axis = np.arange(0, len(comp_budgets), 1)
-    
-        # Plot Cost
-        plt.bar(x_axis, budget_results[:,0])
-        plt.title("Error of Result for Budgets")
-        plt.xlabel('Budget ID')
-        plt.ylabel('Lowest Final Error Achieved')
-        plt.xticks(np.arange(min(x_axis), max(x_axis)+1, 1.0))
-        plt.show()
-        
-        # Plot Time
-        plt.bar(x_axis, budget_results[:,1])
-        plt.title("Time Taken by Budgets")
-        plt.xlabel('Budget ID')
-        plt.ylabel('Lowest Time Taken')
-        plt.xticks(np.arange(min(x_axis), max(x_axis)+1, 1.0))
-        plt.show()
-    
-    
 #------------------------------------------------------------------------------        
 
 if __name__=='__main__':
-
     
+    
+    '''
     test_particle_filter_search(use_image_one=True,
-                                pop_size=100,
-                                num_generations=10,
+                                pop_size=40,
+                                num_generations=50,
                                 verbose=True)
+    '''
+    
 
-
-    """
+    '''
     comparison = compare_pop_vs_gen(iterations = 5,
-                                    num_individuals = 1000,
+                                    num_individuals = 200,
                                     image_one = True,
                                     verbose=True)
-    """
+    '''
+    
 
-    """   
-    budgets = [200, 400, 600, 800, 1000, 1200, 1400, 1600, 1800, 2000]
+    '''     
+    budgets = [100, 200], 400, 600] #, 800, 1000, 1200, 1400, 1600, 1800, 2000]
     compare_computational_budgets(budgets,
-                                  iteration_count = 100,
+                                  iteration_count = 3,
                                   use_image_one=True,
-                                  verbose=True)
-    """    
+                                  verbose=False)
+    '''
+    
 #------------------------------------------------------------------------------
